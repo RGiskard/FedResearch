@@ -1,0 +1,7 @@
+{
+  "use_divergence": true,
+  "use_relevance": true,
+  "pruning_ratio": 0.2,
+  "data_path": "data/dataset.pkl",
+  "db_path": "databases/client_metrics.db"
+}

@@ -1,0 +1,5 @@
+{
+  "num_rounds": 10,
+  "divergence_threshold": 0.5,
+  "relevance_threshold": 0.7
+}
