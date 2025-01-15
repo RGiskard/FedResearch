@@ -6,9 +6,12 @@ Implementación de VGG
 import torch
 import torch.nn as nn
 from models.base_model import BaseModel
+from utils.reproducibility import set_seeds
+
 
 class VGG(BaseModel):
     def __init__(self, features, num_classes=10):
+        set_seeds(42)
         super(VGG, self).__init__()
         self.features = features
         self.classifier = nn.Sequential(

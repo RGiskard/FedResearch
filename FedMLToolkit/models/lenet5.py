@@ -6,9 +6,11 @@ Implementación de LeNet5
 import torch
 import torch.nn as nn
 from models.base_model import BaseModel
+from utils.reproducibility import set_seeds
 
 class LeNet5(BaseModel):
     def __init__(self):
+        set_seeds(42)
         super(LeNet5, self).__init__()
         self.conv1 = nn.Conv2d(1, 6, kernel_size=5)
         self.conv2 = nn.Conv2d(6, 16, kernel_size=5)
