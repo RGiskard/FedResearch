@@ -1,5 +1,13 @@
 {
   "num_rounds": 10,
-  "divergence_threshold": 0.5,
-  "relevance_threshold": 0.7
+  "divergence_threshold": 0.4,
+  "relevance_threshold": 0.6,
+  "use_average_divergence": false,
+  "dynamic_threshold": true,
+  "entropy_criterion": "lesser",
+  "server_capacity": 4,
+  "fraction_fit": 1,
+  "min_fit_clients": 10,
+  "min_available_clients": 10,
+  "output_dir": "/home/moebius/FedResearch/"        
 }

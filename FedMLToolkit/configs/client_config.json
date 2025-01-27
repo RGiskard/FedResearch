@@ -9,7 +9,9 @@
   "pruning_ratio": 0.2,
   "divergence_threshold": 0.1,
   "relevance_threshold": 0.05,
-  "data_path": "data/client_{cid}.pkl",    // Ruta para el modo estático
-  "data_template": "data/client_{cid}_round_{round}.pkl", // Ruta para el modo dinámico
-  "data_mode": "static"                 // Puede ser "static" o "dynamic"
+  "data_path": "data/client_{cid}.npz",    
+  "data_template": "data/client_{cid}_{round}.npz", 
+  "data_mode": "dynamic",   
+  "validation_file": "data/mnist_dirichlet_test.npz",
+  "output_dir": "/home/moebius/FedResearch/"            
 }

@@ -9,8 +9,9 @@ import os
 import json
 import csv
 import torch
+import time  # Importar el módulo time
 import flwr as fl
-from utils.data_utils import load_data
+from utils.data_utils import load_data, load_validation_data
 from models.lenet5 import LeNet5
 from models.alexnet import AlexNet
 from models.vgg import VGG
@@ -23,19 +24,24 @@ class EntropicFLClient(fl.client.NumPyClient):
 
         # Inicializar cliente
         self.cid = cid
+        self.first_round = True  # Bandera para indicar si es la primera ronda
         self._initialize_client()
 
     def _load_config(self, config_path=None):
         """Cargar configuración desde un archivo JSON."""
         if config_path is None:
-            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "client_config.json")
+            config_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "configs",
+                "client_config.json"
+            )
         with open(config_path, 'r') as f:
             return json.load(f)
 
     def _initialize_client(self):
         """Inicializar el cliente con los parámetros de configuración."""
         # Configuración del cliente
-        self.data_mode = self.config.get("data_mode", "static").lower()  # static o dynamic
+        self.data_mode = self.config.get("data_mode", "static").lower()
         self.data_path = self.config["data_path"]
         self.data_template = self.config.get("data_template", None)
         self.model_name = self.config.get("model", "lenet")
@@ -54,8 +60,13 @@ class EntropicFLClient(fl.client.NumPyClient):
         self.model = self._load_model().to(self.device)
         self.optimizer = self._load_optimizer()
 
+
+        base_output_dir = self.config.get("output_dir")
+        output_dir = os.path.join(base_output_dir, f"results")
+        # Directorio de salida
+        os.makedirs(output_dir, exist_ok=True)  # Crear directorio si no existe
         # Inicializar archivo de métricas
-        self.metrics_file = f"client_{self.cid}_metrics.csv"
+        self.metrics_file = os.path.join(output_dir, f"client_{self.cid}_metrics.csv")
         self._create_csv_header()
 
     def _load_model(self):
@@ -81,11 +92,7 @@ class EntropicFLClient(fl.client.NumPyClient):
         return optimizers[self.optimizer_name.lower()](self.model.parameters(), lr=self.learning_rate)
 
     def _resolve_data_path(self, round=None):
-        """
-        Resolver la ruta de los datos según el modo:
-        - Modo estático: Se usa solo el cid.
-        - Modo dinámico: Se usa cid y round.
-        """
+        """Resolver la ruta de los datos según el modo."""
         if self.data_mode == "dynamic":
             if self.data_template is None:
                 raise ValueError("La plantilla de datos (data_template) no está definida en el modo dinámico.")
@@ -98,11 +105,16 @@ class EntropicFLClient(fl.client.NumPyClient):
             raise ValueError(f"Modo de datos no reconocido: {self.data_mode}")
 
     def _load_data(self, round=None):
-        """Cargar los datos de entrenamiento y prueba."""
-        data_path = self._resolve_data_path(round)
-        if not os.path.exists(data_path):
-            raise FileNotFoundError(f"No se encontró el archivo de datos: {data_path}")
-        return load_data(data_path, batch_size=self.batch_size)
+        """Cargar datos de entrenamiento según el modo."""
+        train_loader = load_data(
+            data_path_template=self.data_template if self.data_mode == "dynamic" else self.data_path,
+            cid=self.cid,
+            data_mode=self.data_mode,
+            round=round,
+            batch_size=self.batch_size,
+            device=self.device
+        )
+        return train_loader
 
     def _create_csv_header(self):
         """Crear el archivo CSV con los encabezados si no existe."""
@@ -121,6 +133,47 @@ class EntropicFLClient(fl.client.NumPyClient):
             writer = csv.DictWriter(file, fieldnames=metrics.keys())
             writer.writerow(metrics)
 
+    def _load_validation_data(self):
+        """Cargar datos de validación."""
+        validation_file = self.config.get("validation_file", None)
+        if validation_file is None:
+            raise ValueError("El archivo de validación ('validation_file') no está especificado en la configuración.")
+        validation_loader = load_validation_data(
+            validation_file=validation_file,
+            batch_size=self.batch_size,
+            device=self.device
+        )
+        return validation_loader
+
+
+    def _calculate_entropy(self, data_loader):
+        """
+        Calcular la entropía de Shannon usando los datos de un DataLoader.
+        :param data_loader: DataLoader de PyTorch con los datos.
+        :return: Entropía calculada.
+        """
+        import numpy as np
+
+        # Acumular frecuencias relativas de las clases
+        class_counts = {}
+        total_samples = 0
+
+        for inputs, labels in data_loader:
+            labels = labels.cpu().numpy()
+            for label in labels:
+                class_counts[label] = class_counts.get(label, 0) + 1
+            total_samples += len(labels)
+
+        # Convertir a probabilidades
+        probabilities = np.array(list(class_counts.values())) / total_samples
+
+        # Calcular entropía de Shannon
+        entropy = -np.sum(probabilities * np.log2(probabilities + 1e-9))  # Evitar log(0)
+
+        return entropy
+
+
+
     def get_parameters(self, config):
         """Obtener los parámetros actuales del modelo."""
         return [param.data.cpu().numpy() for param in self.model.parameters()]
@@ -131,69 +184,85 @@ class EntropicFLClient(fl.client.NumPyClient):
             param.data = torch.tensor(new_data).to(self.device)
 
     def fit(self, parameters, config):
-        """Entrenar el modelo localmente."""
-        # Verificar si existe la variable de cids en la configuración
-        if "selected_cids" not in config:
-            raise ValueError("La lista de cids seleccionados ('selected_cids') no fue proporcionada por el servidor.")
+        """Entrenar el modelo localmente y enviar la entropía al servidor."""
+        # Establecer los parámetros recibidos
+        self.set_parameters(parameters)
 
-        # Parsear la lista de cids seleccionados
-        selected_cids = config["selected_cids"].split(",")
+        # Verificar si es la primera ronda
+        if self.first_round:
+            print(f"Cliente {self.cid}: Primera ronda detectada. Configuración predeterminada aplicada.")
+            round_number = 1  # Primera ronda usa 1 como valor predeterminado
+        else:
+            round_number = config.get("server_round", None)
+            if round_number is None:
+                raise ValueError("El número de ronda ('server_round') es obligatorio después de la primera ronda.")
 
-        # Si el cliente no está seleccionado, no entrena pero devuelve los parámetros
-        if str(self.cid) not in selected_cids:
-            print(f"Cliente {self.cid} no seleccionado para entrenar en esta ronda.")
-            return self.get_parameters(config), len(self._load_data()[0].dataset), {"skipped": True}
+        # Cargar los datos de entrenamiento para la ronda actual
+        self.train_loader = self._load_data(round=round_number)
 
-        # Cargar datos según el modo y ronda
-        round_number = config.get("round", None)
-        self.train_loader, self.test_loader = self._load_data(round=round_number)
+        # Entrenar el modelo y calcular la pérdida y precisión
 
-        # Entrenar utilizando el método `fit` del modelo
-        self.model.fit(
+        # Medir el tiempo de inicio
+        start_time = time.time()
+
+        # Entrenar el modelo y calcular la pérdida y precisión
+        loss, acc = self.model.fit(
             data_loader=self.train_loader,
             optimizer=self.optimizer,
             epochs=self.epochs,
             verbose=self.verbose
         )
 
-        # Guardar métricas de entrenamiento en archivo CSV
+        # Medir el tiempo de fin
+        end_time = time.time()
+
+        # Calcular el tiempo total de entrenamiento
+        training_time = end_time - start_time
+
+        # Calcular la entropía para el cliente  (usando tus datos de entrenamiento futuro)
+        entropy = self._calculate_entropy(self._load_data(round_number+1))
+
+        # Guardar métricas en un archivo CSV
         self._save_metrics({
             "Client ID": self.cid,
             "Epoch": self.epochs,
-            "Loss": None,
-            "Divergence": None,
-            "Relevance": None,
-            "Accuracy": None,
-            "Training Time (s)": None
+            "Loss": loss,
+            "Divergence": None,  # Puedes incluir la divergencia si es relevante
+            "Relevance": None,   # Puedes incluir la relevancia si es relevante
+            "Accuracy": acc,
+            "Training Time (s)": training_time
         })
 
-        # Devolver los parámetros actualizados
-        return self.get_parameters(config), len(self.train_loader.dataset), {"skipped": False}
+        self.first_round = False
 
+        # Retornar los parámetros, el tamaño de los datos y las métricas (incluyendo la entropía)
+        return self.get_parameters(config), len(self.train_loader.dataset), {
+            "client_id": self.cid,
+            "accuracy": acc,
+            "loss": loss,
+            "entropy": entropy,  # Entropía enviada al servidor
+            "skipped": False
+        }
+
+    
     def evaluate(self, parameters, config):
-        """Evaluar el modelo localmente."""
-        # Establecer los parámetros recibidos
+        """Evaluar el modelo localmente con datos de validación."""
         self.set_parameters(parameters)
+        validation_loader = self._load_validation_data()
 
-        # Cargar datos (modo estático por defecto para evaluación)
-        self.train_loader, self.test_loader = self._load_data()
-
-        # Evaluar utilizando el método `evaluate` del modelo
         avg_loss, accuracy = self.model.evaluate(
-            data_loader=self.test_loader,
+            data_loader=validation_loader,
             verbose=self.verbose
         )
 
-        # Guardar métricas de evaluación en archivo CSV
-        self._save_metrics({
-            "Client ID": self.cid,
-            "Epoch": None,
-            "Loss": avg_loss,
-            "Divergence": None,
-            "Relevance": None,
-            "Accuracy": accuracy,
-            "Training Time (s)": None
-        })
+#        self._save_metrics({
+#            "Client ID": self.cid,
+#            "Epoch": None,
+#            "Loss": avg_loss,
+#            "Divergence": None,
+#            "Relevance": None,
+#            "Accuracy": accuracy,
+#            "Training Time (s)": None
+#        })
 
-        # Devolver pérdida, tamaño de conjunto y métricas adicionales
-        return avg_loss, len(self.test_loader.dataset), {"accuracy": accuracy}
+        return avg_loss, len(validation_loader.dataset), {"accuracy": accuracy, "loss":avg_loss}
