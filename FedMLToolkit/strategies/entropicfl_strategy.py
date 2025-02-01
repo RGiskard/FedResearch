@@ -58,23 +58,21 @@ class EntropicFLServer(fl.server.strategy.FedAvg):
 
     def _initialize_csv_files(self):
         """Create CSV log files if they do not exist."""
-        # Fit log file
-        if not os.path.isfile(self.fit_log_file):
-            with open(self.fit_log_file, "w", newline="") as file:
-                writer = csv.writer(file)
-                writer.writerow(["server_round", "total_clients", "selected_clients", "aggregated_loss", "aggregated_accuracy"])
+        self._write_to_csv(self.fit_log_file, ["server_round", "aggregated_accuracy", "aggregated_loss", "available_clients"], init=True)
+        self._write_to_csv(self.eval_log_file, ["server_round", "aggregated_accuracy", "aggregated_loss", "available_clients"], init=True)
+        self._write_to_csv(self.participation_log_file, ["server_round", "client_id", "entropy", "participated"], init=True)
 
-        # Evaluation log file
-        if not os.path.isfile(self.eval_log_file):
-            with open(self.eval_log_file, "w", newline="") as file:
-                writer = csv.writer(file)
-                writer.writerow(["server_round", "aggregated_accuracy", "aggregated_loss", "available_clients"])
-
-        # Participation log file
-        if not os.path.isfile(self.participation_log_file):
-            with open(self.participation_log_file, "w", newline="") as file:
-                writer = csv.writer(file)
-                writer.writerow(["server_round", "client_id", "entropy", "participated"])
+    def _write_to_csv(self, file_path, row, init=False):
+        """
+        Write a row to a CSV file. Create the file if it does not exist.
+        :param file_path: Path to the CSV file.
+        :param row: List representing a row to write.
+        :param init: If True, treat the row as a header.
+        """
+        mode = "w" if init else "a"
+        with open(file_path, mode, newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(row)
 
     def _select_clients_based_on_entropy(self, client_metrics):
         """
@@ -99,15 +97,12 @@ class EntropicFLServer(fl.server.strategy.FedAvg):
         """
         Log which clients participated and their entropy in the current round.
         """
-        with open(self.participation_log_file, "a", newline="") as file:
-            writer = csv.writer(file)
-            for client in client_metrics:
-                writer.writerow([
-                    server_round,
-                    client["cid"],
-                    client["entropy"],
-                    client["cid"] in selected_clients  # True if the client was selected
-                ])
+        rows = [
+            [server_round, client["cid"], client["entropy"], client["cid"] in selected_clients]
+            for client in client_metrics
+        ]
+        for row in rows:
+            self._write_to_csv(self.participation_log_file, row)
 
     def configure_fit(self, server_round, parameters, client_manager):
         """
@@ -150,16 +145,13 @@ class EntropicFLServer(fl.server.strategy.FedAvg):
         results: List[Tuple[ClientProxy, FitRes]],
         failures: List[BaseException],
     ):
-        """
-        Aggregate training results sent by the clients.
-        """
         print(f"Iniciando aggregate_fit para la ronda {server_round}")
-        self._fit_results = results
-
+        self._fit_results = results  # Save results for later use in configure_fit
         if not results:
             print(f"Round {server_round}: No results received from clients.")
             return None, {}
 
+        # Calculate aggregated metrics
         total_examples = sum(fit_res.num_examples for _, fit_res in results)
         accuracies = [fit_res.metrics["accuracy"] * fit_res.num_examples for _, fit_res in results]
         losses = [fit_res.metrics["loss"] * fit_res.num_examples for _, fit_res in results]
@@ -167,19 +159,15 @@ class EntropicFLServer(fl.server.strategy.FedAvg):
         aggregated_accuracy = sum(accuracies) / total_examples if total_examples > 0 else 0.0
         aggregated_loss = sum(losses) / total_examples if total_examples > 0 else 0.0
 
-        print(f"Guardando métricas de la ronda {server_round} en {self.fit_log_file}")
-        with open(self.fit_log_file, "a", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow([
-                server_round,
-                len(results),
-                len(results),
-                aggregated_loss,
-                aggregated_accuracy,
-            ])
+        # Write metrics to CSV
+        self._write_to_csv(
+            self.fit_log_file,
+            [server_round, len(results), aggregated_loss, aggregated_accuracy]
+        )
 
-        print(f"Round {server_round}: Aggregated loss: {aggregated_loss:.4f}, Aggregated accuracy: {aggregated_accuracy:.4f}")
+        print(f"Ronda {server_round}: Loss agregada: {aggregated_loss:.4f}, Accuracy agregada: {aggregated_accuracy:.4f}")
 
+        # Aggregate parameters using FedAvg
         weights_results = [
             (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples) for _, fit_res in results
         ]
@@ -208,9 +196,7 @@ class EntropicFLServer(fl.server.strategy.FedAvg):
         aggregated_accuracy = sum(accuracies) / total_examples if total_examples > 0 else 0.0
         aggregated_loss = sum(losses) / total_examples if total_examples > 0 else 0.0
 
-        with open(self.eval_log_file, "a", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow([server_round, aggregated_accuracy, aggregated_loss, len(results)])
+        self._write_to_csv(self.eval_log_file, [server_round, aggregated_accuracy, aggregated_loss, len(results)])
 
         print(f"Round {server_round}: Aggregated loss: {aggregated_loss:.4f}, Aggregated accuracy: {aggregated_accuracy:.4f}")
 
