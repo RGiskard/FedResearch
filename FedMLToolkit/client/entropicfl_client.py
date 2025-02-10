@@ -185,13 +185,23 @@ class EntropicFLClient(fl.client.NumPyClient):
 
     def fit(self, parameters, config):
         """Entrenar el modelo localmente y enviar la entropía al servidor."""
+
+        # 🔍 Verificar los parámetros recibidos
+        print(f"\n🔎 Cliente {self.cid}: Configuración recibida en `fit()`: {config}")
+
+        # Verificar si `selected_clients` está en `config`
+        selected_clients = config.get("selected_clients", None)
+        if selected_clients is not None:
+            print(f"🔹 Cliente {self.cid}: Lista de clientes seleccionados para esta ronda: {selected_clients}")
+
         # Establecer los parámetros recibidos
         self.set_parameters(parameters)
-
+        print(f" Cliente {self.cid}: Ejecutando fit() en la ronda {config.get('server_round', 'Desconocida')}")
+        
         # Verificar si es la primera ronda
         if self.first_round:
             print(f"Cliente {self.cid}: Primera ronda detectada. Configuración predeterminada aplicada.")
-            round_number = 1  # Primera ronda usa 1 como valor predeterminado
+            round_number = 1
         else:
             round_number = config.get("server_round", None)
             if round_number is None:
@@ -199,8 +209,6 @@ class EntropicFLClient(fl.client.NumPyClient):
 
         # Cargar los datos de entrenamiento para la ronda actual
         self.train_loader = self._load_data(round=round_number)
-
-        # Entrenar el modelo y calcular la pérdida y precisión
 
         # Medir el tiempo de inicio
         start_time = time.time()
@@ -215,20 +223,19 @@ class EntropicFLClient(fl.client.NumPyClient):
 
         # Medir el tiempo de fin
         end_time = time.time()
-
-        # Calcular el tiempo total de entrenamiento
         training_time = end_time - start_time
 
-        # Calcular la entropía para el cliente  (usando tus datos de entrenamiento futuro)
+        # Calcular la entropía para la siguiente ronda
         entropy = self._calculate_entropy(self._load_data(round_number+1))
+        print(f"La entropia para el cliente:{self.cid} es {entropy}")
 
         # Guardar métricas en un archivo CSV
         self._save_metrics({
             "Client ID": self.cid,
             "Epoch": self.epochs,
             "Loss": loss,
-            "Divergence": None,  # Puedes incluir la divergencia si es relevante
-            "Relevance": None,   # Puedes incluir la relevancia si es relevante
+            "Divergence": None,
+            "Relevance": None,
             "Accuracy": acc,
             "Training Time (s)": training_time
         })
@@ -237,12 +244,13 @@ class EntropicFLClient(fl.client.NumPyClient):
 
         # Retornar los parámetros, el tamaño de los datos y las métricas (incluyendo la entropía)
         return self.get_parameters(config), len(self.train_loader.dataset), {
-            "client_id": self.cid,
+            "cid": str(self.cid),
             "accuracy": acc,
             "loss": loss,
-            "entropy": entropy,  # Entropía enviada al servidor
+            "entropy": entropy,
             "skipped": False
         }
+
 
     
     def evaluate(self, parameters, config):

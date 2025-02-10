@@ -5,9 +5,9 @@
   "use_average_divergence": false,
   "dynamic_threshold": true,
   "entropy_criterion": "lesser",
-  "server_capacity": 10,
+  "server_capacity": 4,
   "fraction_fit": 1,
-  "min_fit_clients": 10,
-  "min_available_clients": 10,
+  "min_fit_clients": 4,
+  "min_available_clients": 4,
   "output_dir": "/home/moebius/FedResearch/"        
 }
