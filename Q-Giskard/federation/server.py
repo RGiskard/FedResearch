@@ -1,20 +1,14 @@
 """
-q_giskard.server
+q_giskard.federation.server
 
-Starts Flower server for Q-Giskard federated quantum training.
+Flower Server for Federated Quantum Learning.
 
 References:
-- Bonawitz, K., Eichner, H., et al. (2019). Towards federated learning at scale: system design. *Proceedings of MLSys*.
-
-GISKARD:
-A - Aggregation & Averaging
-R - Remote Coordination
-D - Distribution & Deployment
+- Bonawitz, K., et al. (2019). Towards Federated Learning at Scale: System Design. MLSys.
 """
 import flwr as fl
 
 def start_server():
-    # Use FedAvg strategy over qubit parameter vectors
     strategy = fl.server.strategy.FedAvg(
         min_fit_clients=2,
         min_available_clients=2,

@@ -1,20 +1,13 @@
 """
 q_giskard.utils
 
-Helper functions: serialization, deserialization, metrics.
-
-GISKARD:
-U (utility): package utilities
+Utility helpers: serialization, deserialization, logging, metrics.
 """
 def serialize(params):
-    """
-    Convert numpy params array to list for serialization.
-    """
+    # Convert numpy array to list for JSON serialization
     return params.tolist()
 
 def deserialize(param_list):
-    """
-    Convert list back to numpy array.
-    """
+    # Convert list back to numpy array
     import numpy as np
     return np.array(param_list)
