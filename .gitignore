@@ -1,0 +1,9 @@
+# Ignore the FedMLToolkit folder
+FedMLToolkit/
+
+# Ignore the local virtualenv folder
+env/
+
+# Ignore the setup script
+setup.sh
+EOF
